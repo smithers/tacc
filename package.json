@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.78.0",
     "@prisma/adapter-pg": "^7.4.2",
     "@prisma/client": "^7.4.2",
+    "prisma": "^7.4.2",
     "@react-pdf/renderer": "^4.3.2",
     "bcryptjs": "^3.0.3",
     "jsonwebtoken": "^9.0.3",
@@ -31,7 +32,6 @@
     "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "prisma": "^7.4.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
