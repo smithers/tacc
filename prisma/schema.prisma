@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      String   @default("user") // "user" or "admin"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  uploads   Upload[]
+  settings  Settings?
+}
+
+model Settings {
+  id       String @id @default(cuid())
+  prompt   String @default("You are a veterinary cardiologist. Summarize the following discharge notes, highlighting key cardiac findings, medications, and follow-up recommendations.")
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId   String @unique
+}
+
+model Patient {
+  id        String     @id @default(cuid())
+  name      String
+  species   String
+  breed     String?
+  ownerName String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  uploads   Upload[]
+}
+
+model Upload {
+  id        String   @id @default(cuid())
+  filename  String
+  fileData  Bytes
+  mimeType  String   @default("application/pdf")
+  createdAt DateTime @default(now())
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  summary   Summary?
+}
+
+model Summary {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
+  upload    Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  uploadId  String   @unique
+}
