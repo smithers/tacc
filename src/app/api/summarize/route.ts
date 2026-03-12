@@ -110,6 +110,36 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Consolidation step — all chunks done, combine summaries
+  if (summaryRecord.status === "consolidating") {
+    const partialSummaries: string[] = JSON.parse(summaryRecord.chunkSummaries || "[]");
+    try {
+      const combinedMessage = await anthropic.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [
+          {
+            role: "user",
+            content: `The following are summaries from different sections of the same patient's discharge notes. Please combine them into one cohesive summary, removing any redundancy:\n\n${partialSummaries.map((s, i) => `--- Part ${i + 1} ---\n${s}`).join("\n\n")}`,
+          },
+        ],
+      });
+      const finalBlock = combinedMessage.content[0];
+      const finalText = finalBlock.type === "text" ? finalBlock.text : "";
+
+      summaryRecord = await prisma.summary.update({
+        where: { id: summaryRecord.id },
+        data: { content: finalText, status: "complete" },
+      });
+      return NextResponse.json({ summary: summaryRecord, status: "complete" });
+    } catch (err: unknown) {
+      const apiError = err as { status?: number; error?: { error?: { message?: string } } };
+      const msg = apiError.error?.error?.message || "Failed to consolidate summary";
+      return NextResponse.json({ error: msg }, { status: apiError.status || 500 });
+    }
+  }
+
   // If still processing, do the next chunk
   if (summaryRecord.status === "processing") {
     const chunkIndex = summaryRecord.chunksComplete;
@@ -143,26 +173,17 @@ export async function POST(req: NextRequest) {
         const isLastChunk = newChunksComplete === chunks.length;
 
         if (isLastChunk) {
-          // All chunks done — consolidate with Sonnet
-          const combinedMessage = await anthropic.messages.create({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 4096,
-            system: systemPrompt,
-            messages: [
-              {
-                role: "user",
-                content: `The following are summaries from different sections of the same patient's discharge notes. Please combine them into one cohesive summary, removing any redundancy:\n\n${partialSummaries.map((s, i) => `--- Part ${i + 1} ---\n${s}`).join("\n\n")}`,
-              },
-            ],
-          });
-          const finalBlock = combinedMessage.content[0];
-          const finalText = finalBlock.type === "text" ? finalBlock.text : "";
-
+          // All chunks summarized — mark as "consolidating", client will poll once more
           summaryRecord = await prisma.summary.update({
             where: { id: summaryRecord.id },
-            data: { content: finalText, status: "complete", chunksComplete: newChunksComplete, chunkSummaries: JSON.stringify(partialSummaries) },
+            data: { status: "consolidating", chunksComplete: newChunksComplete, chunkSummaries: JSON.stringify(partialSummaries) },
           });
-          return NextResponse.json({ summary: summaryRecord, status: "complete" });
+          return NextResponse.json({
+            status: "processing",
+            chunksComplete: newChunksComplete,
+            totalChunks: chunks.length,
+            summaryId: summaryRecord.id,
+          });
         } else {
           // More chunks to go
           summaryRecord = await prisma.summary.update({

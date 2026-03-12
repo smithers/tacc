@@ -37,9 +37,17 @@ export default function UploadPage() {
         })(),
       });
 
-      const uploadData = await patientRes.json();
+      let uploadData;
+      try {
+        uploadData = await patientRes.json();
+      } catch {
+        throw new Error("Upload failed — server returned an invalid response");
+      }
       if (!patientRes.ok) {
         throw new Error(uploadData.error || "Upload failed");
+      }
+      if (!uploadData.upload?.id) {
+        throw new Error("Upload failed — no upload ID returned");
       }
 
       const { upload } = uploadData;
@@ -55,20 +63,28 @@ export default function UploadPage() {
           body: JSON.stringify({ uploadId: upload.id, notes }),
         });
 
-        const sumData = await sumRes.json();
+        let sumData;
+        try {
+          sumData = await sumRes.json();
+        } catch {
+          throw new Error("Summarization failed — server returned an invalid response. Please try again.");
+        }
         if (!sumRes.ok) {
           throw new Error(sumData.error || "Summarization failed");
         }
 
-        if (sumData.status === "complete") {
+        if (sumData.status === "complete" && sumData.summary?.id) {
           complete = true;
           router.push(`/results/${sumData.summary.id}`);
         } else if (sumData.status === "processing") {
           setProgress(`Processing chunk ${sumData.chunksComplete} of ${sumData.totalChunks}...`);
           // Wait before next request to respect rate limits
           await new Promise((resolve) => setTimeout(resolve, 60000));
+        } else if (sumData.status === "complete" && sumData.summaryId) {
+          complete = true;
+          router.push(`/results/${sumData.summaryId}`);
         } else {
-          throw new Error("Unexpected response");
+          throw new Error("Unexpected response from server");
         }
       }
     } catch (err) {
