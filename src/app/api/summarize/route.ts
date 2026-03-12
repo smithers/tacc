@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 
 const anthropic = new Anthropic({ maxRetries: 5 });
 
-const MAX_PAGES_PER_CHUNK = 10;
+const MAX_PAGES_PER_CHUNK = 50;
 
 const DEFAULT_PROMPT =
   "You are a veterinary cardiologist. Summarize the following discharge notes, highlighting key cardiac findings, medications, and follow-up recommendations.";
@@ -46,7 +46,7 @@ async function summarizeChunk(
     : `${chunkLabel}\n\nPlease summarize these discharge notes.`;
 
   const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 2048,
     system: systemPrompt,
     messages: [
@@ -107,21 +107,36 @@ export async function POST(req: NextRequest) {
     let summaryText: string;
 
     if (chunks.length === 1) {
+      // Single chunk — use Sonnet directly for best quality
       const pdfBase64 = chunks[0].toString("base64");
-      summaryText = await summarizeChunk(pdfBase64, systemPrompt, "", notes);
+      const userText = notes
+        ? `Please summarize these discharge notes. Additional rDVM notes/comments:\n\n${notes}`
+        : "Please summarize these discharge notes.";
+      const message = await anthropic.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [
+          { role: "user", content: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
+            { type: "text", text: userText },
+          ]},
+        ],
+      });
+      const block = message.content[0];
+      summaryText = block.type === "text" ? block.text : "";
     } else {
       // Summarize each chunk with delays to respect rate limits
       const chunkSummaries: string[] = [];
       for (let i = 0; i < chunks.length; i++) {
-        if (i > 0) await delay(30000); // 30s between chunks for rate limits
+        if (i > 0) await delay(5000); // brief delay between chunks
         const pdfBase64 = chunks[i].toString("base64");
         const label = `[Part ${i + 1} of ${chunks.length}]`;
         const chunkSummary = await summarizeChunk(pdfBase64, systemPrompt, label, i === 0 ? notes : undefined);
         chunkSummaries.push(chunkSummary);
       }
 
-      // Final consolidation call
-      await delay(30000);
+      // Final consolidation call using Sonnet for quality
       const combinedMessage = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 4096,
