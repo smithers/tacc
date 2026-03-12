@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import * as pdfParseModule from "pdf-parse";
-const pdfParse = (pdfParseModule as { default?: typeof pdfParseModule }).default || pdfParseModule;
+import { extractText } from "unpdf";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
@@ -38,8 +37,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const pdfBuffer = Buffer.from(upload.fileData);
-    const pdfData = await pdfParse(pdfBuffer);
-    const pdfText = pdfData.text?.trim();
+    const { text: pdfText } = await extractText(pdfBuffer);
 
     const notesText = notes
       ? `\n\nAdditional rDVM notes/comments:\n\n${notes}`
@@ -47,7 +45,7 @@ export async function POST(req: NextRequest) {
 
     let content: string;
 
-    if (pdfText && pdfText.length > 50) {
+    if (pdfText?.trim() && pdfText.trim().length > 50) {
       // Text-based PDF — send extracted text
       content = `Please summarize these discharge notes.${notesText}\n\n--- Discharge Notes ---\n${pdfText}`;
     } else {
