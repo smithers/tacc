@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import pdfParse from "pdf-parse";
+import * as pdfParseModule from "pdf-parse";
+const pdfParse = (pdfParseModule as { default?: typeof pdfParseModule }).default || pdfParseModule;
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
