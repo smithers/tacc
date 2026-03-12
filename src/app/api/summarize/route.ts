@@ -6,12 +6,7 @@ import { prisma } from "@/lib/db";
 
 const anthropic = new Anthropic();
 
-const MAX_PAGES_PER_CHUNK = 20;
-const DELAY_BETWEEN_CHUNKS_MS = 65000; // 65s to respect 30k tokens/min rate limit
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const MAX_PAGES_PER_CHUNK = 50;
 
 const DEFAULT_PROMPT =
   "You are a veterinary cardiologist. Summarize the following discharge notes, highlighting key cardiac findings, medications, and follow-up recommendations.";
@@ -113,7 +108,6 @@ export async function POST(req: NextRequest) {
       // Multiple chunks — summarize each, then combine
       const chunkSummaries: string[] = [];
       for (let i = 0; i < chunks.length; i++) {
-        if (i > 0) await delay(DELAY_BETWEEN_CHUNKS_MS);
         const pdfBase64 = chunks[i].toString("base64");
         const label = `[Part ${i + 1} of ${chunks.length}]`;
         const chunkSummary = await summarizeChunk(pdfBase64, systemPrompt, label, i === 0 ? notes : undefined);
@@ -121,7 +115,6 @@ export async function POST(req: NextRequest) {
       }
 
       // Final consolidation call
-      await delay(DELAY_BETWEEN_CHUNKS_MS);
       const combinedMessage = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 4096,
