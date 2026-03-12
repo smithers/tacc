@@ -35,32 +35,39 @@ export async function POST(req: NextRequest) {
 
   const pdfBase64 = Buffer.from(upload.fileData).toString("base64");
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: pdfBase64,
+  let message;
+  try {
+    message = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: pdfBase64,
+              },
             },
-          },
-          {
-            type: "text",
-            text: notes
-              ? `Please summarize these discharge notes. Additional rDVM notes/comments:\n\n${notes}`
-              : "Please summarize these discharge notes.",
-          },
-        ],
-      },
-    ],
-  });
+            {
+              type: "text",
+              text: notes
+                ? `Please summarize these discharge notes. Additional rDVM notes/comments:\n\n${notes}`
+                : "Please summarize these discharge notes.",
+            },
+          ],
+        },
+      ],
+    });
+  } catch (err: unknown) {
+    const apiError = err as { status?: number; error?: { error?: { message?: string } } };
+    const msg = apiError.error?.error?.message || "Failed to process PDF";
+    return NextResponse.json({ error: msg }, { status: apiError.status || 500 });
+  }
 
   const contentBlock = message.content[0];
   const summaryText = contentBlock.type === "text" ? contentBlock.text : "";
