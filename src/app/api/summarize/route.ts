@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 
 const anthropic = new Anthropic({ maxRetries: 5 });
 
-const MAX_PAGES_PER_CHUNK = 50;
+const MAX_PAGES_PER_CHUNK = 25;
 
 const DEFAULT_PROMPT =
   "You are a veterinary cardiologist. Summarize the following discharge notes, highlighting key cardiac findings, medications, and follow-up recommendations.";
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
       // Summarize each chunk with delays to respect rate limits
       const chunkSummaries: string[] = [];
       for (let i = 0; i < chunks.length; i++) {
-        if (i > 0) await delay(5000); // brief delay between chunks
+        if (i > 0) await delay(45000); // wait for rate limit to reset
         const pdfBase64 = chunks[i].toString("base64");
         const label = `[Part ${i + 1} of ${chunks.length}]`;
         const chunkSummary = await summarizeChunk(pdfBase64, systemPrompt, label, i === 0 ? notes : undefined);
