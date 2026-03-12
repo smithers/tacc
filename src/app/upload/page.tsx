@@ -104,14 +104,6 @@ export default function UploadPage() {
             </label>
           )}
 
-          <textarea
-            placeholder="Additional rDVM notes or comments (optional)"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={4}
-            className="rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm outline-none focus:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50"
-          />
-
           {error && <p className="text-sm text-red-500">{error}</p>}
 
           <button

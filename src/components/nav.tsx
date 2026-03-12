@@ -25,11 +25,12 @@ export default function Nav({ logoOnly = false }: { logoOnly?: boolean }) {
 
   useEffect(() => {
     fetch("/api/auth/me")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        setName(data.user?.name || null);
-        setRole(data.user?.role || null);
-      });
+        setName(data?.user?.name || null);
+        setRole(data?.user?.role || null);
+      })
+      .catch(() => {});
   }, []);
 
   async function handleLogout() {
