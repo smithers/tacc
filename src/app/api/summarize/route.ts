@@ -37,7 +37,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const pdfBuffer = Buffer.from(upload.fileData);
-    const { text: pdfText } = await extractText(pdfBuffer);
+    const { text: pdfPages } = await extractText(pdfBuffer);
+    const pdfText = pdfPages.join("\n").trim();
 
     const notesText = notes
       ? `\n\nAdditional rDVM notes/comments:\n\n${notes}`
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
 
     let content: string;
 
-    if (pdfText?.trim() && pdfText.trim().length > 50) {
+    if (pdfText && pdfText.length > 50) {
       // Text-based PDF — send extracted text
       content = `Please summarize these discharge notes.${notesText}\n\n--- Discharge Notes ---\n${pdfText}`;
     } else {
