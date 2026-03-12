@@ -37,7 +37,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const pdfBuffer = Buffer.from(upload.fileData);
-    const { text: pdfPages } = await extractText(pdfBuffer);
+    const pdfUint8 = new Uint8Array(pdfBuffer);
+    const { text: pdfPages } = await extractText(pdfUint8);
     const pdfText = pdfPages.join("\n").trim();
 
     const notesText = notes
