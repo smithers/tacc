@@ -11,6 +11,7 @@ export default function UploadPage() {
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [progress, setProgress] = useState("");
 
   useEffect(() => {
     fetch("/api/auth/me").then((r) => {
@@ -23,6 +24,7 @@ export default function UploadPage() {
     if (!file) return;
     setLoading(true);
     setError("");
+    setProgress("Uploading...");
 
     try {
       const patientRes = await fetch("/api/upload", {
@@ -42,23 +44,38 @@ export default function UploadPage() {
 
       const { upload } = uploadData;
 
-      const sumRes = await fetch("/api/summarize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uploadId: upload.id, notes }),
-      });
+      // Poll summarization — each call processes one chunk
+      let complete = false;
+      while (!complete) {
+        setProgress("Summarizing...");
 
-      const sumData = await sumRes.json();
-      if (!sumRes.ok) {
-        throw new Error(sumData.error || "Summarization failed");
+        const sumRes = await fetch("/api/summarize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ uploadId: upload.id, notes }),
+        });
+
+        const sumData = await sumRes.json();
+        if (!sumRes.ok) {
+          throw new Error(sumData.error || "Summarization failed");
+        }
+
+        if (sumData.status === "complete") {
+          complete = true;
+          router.push(`/results/${sumData.summary.id}`);
+        } else if (sumData.status === "processing") {
+          setProgress(`Processing chunk ${sumData.chunksComplete} of ${sumData.totalChunks}...`);
+          // Wait before next request to respect rate limits
+          await new Promise((resolve) => setTimeout(resolve, 60000));
+        } else {
+          throw new Error("Unexpected response");
+        }
       }
-
-      const { summary } = sumData;
-      router.push(`/results/${summary.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
+      setProgress("");
     }
   }
 
@@ -114,6 +131,7 @@ export default function UploadPage() {
           />
 
           {error && <p className="text-sm text-red-500">{error}</p>}
+          {progress && <p className="text-sm text-zinc-500">{progress}</p>}
 
           <button
             type="submit"
