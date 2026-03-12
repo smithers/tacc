@@ -6,7 +6,7 @@ import { prisma } from "@/lib/db";
 
 const anthropic = new Anthropic();
 
-const MAX_PAGES_PER_CHUNK = 100;
+const MAX_PAGES_PER_CHUNK = 50;
 
 const DEFAULT_PROMPT =
   "You are a veterinary cardiologist. Summarize the following discharge notes, highlighting key cardiac findings, medications, and follow-up recommendations.";
