@@ -4,12 +4,16 @@ import { PDFDocument } from "pdf-lib";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-const anthropic = new Anthropic();
+const anthropic = new Anthropic({ maxRetries: 5 });
 
-const MAX_PAGES_PER_CHUNK = 50;
+const MAX_PAGES_PER_CHUNK = 10;
 
 const DEFAULT_PROMPT =
   "You are a veterinary cardiologist. Summarize the following discharge notes, highlighting key cardiac findings, medications, and follow-up recommendations.";
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function splitPdfIntoChunks(pdfBuffer: Buffer): Promise<Buffer[]> {
   const pdf = await PDFDocument.load(pdfBuffer);
@@ -43,7 +47,7 @@ async function summarizeChunk(
 
   const message = await anthropic.messages.create({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
+    max_tokens: 2048,
     system: systemPrompt,
     messages: [
       {
@@ -69,6 +73,8 @@ async function summarizeChunk(
   const block = message.content[0];
   return block.type === "text" ? block.text : "";
 }
+
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const user = await getCurrentUser();
@@ -101,13 +107,13 @@ export async function POST(req: NextRequest) {
     let summaryText: string;
 
     if (chunks.length === 1) {
-      // Single chunk — summarize directly
       const pdfBase64 = chunks[0].toString("base64");
       summaryText = await summarizeChunk(pdfBase64, systemPrompt, "", notes);
     } else {
-      // Multiple chunks — summarize each, then combine
+      // Summarize each chunk with delays to respect rate limits
       const chunkSummaries: string[] = [];
       for (let i = 0; i < chunks.length; i++) {
+        if (i > 0) await delay(30000); // 30s between chunks for rate limits
         const pdfBase64 = chunks[i].toString("base64");
         const label = `[Part ${i + 1} of ${chunks.length}]`;
         const chunkSummary = await summarizeChunk(pdfBase64, systemPrompt, label, i === 0 ? notes : undefined);
@@ -115,6 +121,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Final consolidation call
+      await delay(30000);
       const combinedMessage = await anthropic.messages.create({
         model: "claude-sonnet-4-20250514",
         max_tokens: 4096,
