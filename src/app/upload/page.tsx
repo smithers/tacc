@@ -35,12 +35,12 @@ export default function UploadPage() {
         })(),
       });
 
+      const uploadData = await patientRes.json();
       if (!patientRes.ok) {
-        const data = await patientRes.json();
-        throw new Error(data.error || "Upload failed");
+        throw new Error(uploadData.error || "Upload failed");
       }
 
-      const { upload } = await patientRes.json();
+      const { upload } = uploadData;
 
       const sumRes = await fetch("/api/summarize", {
         method: "POST",
@@ -48,12 +48,12 @@ export default function UploadPage() {
         body: JSON.stringify({ uploadId: upload.id, notes }),
       });
 
+      const sumData = await sumRes.json();
       if (!sumRes.ok) {
-        const data = await sumRes.json();
-        throw new Error(data.error || "Summarization failed");
+        throw new Error(sumData.error || "Summarization failed");
       }
 
-      const { summary } = await sumRes.json();
+      const { summary } = sumData;
       router.push(`/results/${summary.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
