@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import pdfParse from "pdf-parse";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-const anthropic = new Anthropic({ maxRetries: 3 });
+const openai = new OpenAI();
 
 const DEFAULT_PROMPT =
   "You are a veterinary cardiologist. Summarize the following discharge notes, highlighting key cardiac findings, medications, and follow-up recommendations.";
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Upload not found" }, { status: 404 });
   }
 
-  if (upload.summary?.status === "complete") {
+  if (upload.summary) {
     return NextResponse.json({ summary: upload.summary, status: "complete" });
   }
 
@@ -36,40 +36,74 @@ export async function POST(req: NextRequest) {
   const systemPrompt = settings?.prompt || DEFAULT_PROMPT;
 
   try {
-    // Extract text from PDF
     const pdfBuffer = Buffer.from(upload.fileData);
     const pdfData = await pdfParse(pdfBuffer);
-    const pdfText = pdfData.text;
+    const pdfText = pdfData.text?.trim();
 
-    if (!pdfText.trim()) {
-      return NextResponse.json({ error: "Could not extract text from PDF. The file may be scanned/image-based." }, { status: 400 });
+    const notesText = notes
+      ? `\n\nAdditional rDVM notes/comments:\n\n${notes}`
+      : "";
+
+    let content: string;
+
+    if (pdfText && pdfText.length > 50) {
+      // Text-based PDF — send extracted text
+      content = `Please summarize these discharge notes.${notesText}\n\n--- Discharge Notes ---\n${pdfText}`;
+    } else {
+      // Scanned PDF — send as base64 image-based content
+      const pdfBase64 = pdfBuffer.toString("base64");
+      const completion = await openai.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 4096,
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: [
+              {
+                type: "file",
+                file: {
+                  filename: upload.filename,
+                  file_data: `data:application/pdf;base64,${pdfBase64}`,
+                },
+              },
+              {
+                type: "text",
+                text: `Please summarize these discharge notes.${notesText}`,
+              },
+            ],
+          },
+        ],
+      });
+
+      const summaryText = completion.choices[0]?.message?.content || "";
+      const summary = await prisma.summary.create({
+        data: { content: summaryText, uploadId: upload.id },
+      });
+      return NextResponse.json({ summary, status: "complete" });
     }
 
-    const userText = notes
-      ? `Please summarize these discharge notes. Additional rDVM notes/comments:\n\n${notes}\n\n--- Discharge Notes ---\n${pdfText}`
-      : `Please summarize these discharge notes.\n\n--- Discharge Notes ---\n${pdfText}`;
-
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
       max_tokens: 4096,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userText }],
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content },
+      ],
     });
 
-    const block = message.content[0];
-    const summaryText = block.type === "text" ? block.text : "";
+    const summaryText = completion.choices[0]?.message?.content || "";
 
     const summary = await prisma.summary.create({
-      data: {
-        content: summaryText,
-        uploadId: upload.id,
-      },
+      data: { content: summaryText, uploadId: upload.id },
     });
 
     return NextResponse.json({ summary, status: "complete" });
   } catch (err: unknown) {
-    const apiError = err as { status?: number; error?: { error?: { message?: string } } };
-    const msg = apiError.error?.error?.message || "Failed to process PDF";
-    return NextResponse.json({ error: msg }, { status: apiError.status || 500 });
+    const error = err as { status?: number; message?: string };
+    return NextResponse.json(
+      { error: error.message || "Failed to process PDF" },
+      { status: error.status || 500 }
+    );
   }
 }
