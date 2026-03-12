@@ -53,10 +53,6 @@ model Upload {
 model Summary {
   id        String   @id @default(cuid())
   content   String
-  status    String   @default("complete") // "processing" or "complete"
-  totalChunks    Int  @default(1)
-  chunksComplete Int  @default(1)
-  chunkSummaries String? // JSON array of partial summaries
   createdAt DateTime @default(now())
   upload    Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
   uploadId  String   @unique
