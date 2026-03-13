@@ -17,86 +17,127 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const { uploadId, notes } = await req.json();
+  const body = await req.json();
 
-  const upload = await prisma.upload.findUnique({
-    where: { id: uploadId },
+  // Support both single uploadId (legacy) and multiple uploadIds
+  const uploadIds: string[] = body.uploadIds || (body.uploadId ? [body.uploadId] : []);
+  const notes: string = body.notes || "";
+
+  if (uploadIds.length === 0) {
+    return NextResponse.json({ error: "No upload IDs provided" }, { status: 400 });
+  }
+
+  const uploads = await prisma.upload.findMany({
+    where: { id: { in: uploadIds } },
     include: { summary: true },
   });
 
-  if (!upload) {
-    return NextResponse.json({ error: "Upload not found" }, { status: 404 });
+  if (uploads.length === 0) {
+    return NextResponse.json({ error: "Uploads not found" }, { status: 404 });
   }
 
-  if (upload.summary) {
-    return NextResponse.json({ summary: upload.summary, status: "complete" });
+  // If first upload already has a summary, return it
+  const firstUpload = uploads.find((u) => u.id === uploadIds[0]) || uploads[0];
+  if (firstUpload.summary) {
+    return NextResponse.json({ summary: firstUpload.summary, status: "complete" });
   }
 
   const settings = await prisma.settings.findUnique({ where: { userId: user.id } });
-  const systemPrompt = settings?.prompt || DEFAULT_PROMPT;
+  const basePrompt = settings?.prompt || DEFAULT_PROMPT;
+  const systemPrompt = notes
+    ? `${basePrompt}\n\nThe user has provided the following additional instructions. If these conflict with the above instructions, prioritize these:\n${notes}`
+    : basePrompt;
 
   try {
-    const pdfBuffer = Buffer.from(upload.fileData);
-    const pdfUint8 = new Uint8Array(pdfBuffer);
-    const { text: pdfPages } = await extractText(pdfUint8);
-    const pdfText = pdfPages.join("\n").trim();
+    const allTextParts: string[] = [];
+    const scannedPdfs: { filename: string; base64: string }[] = [];
+
+    for (const upload of uploads) {
+      const pdfBuffer = Buffer.from(upload.fileData);
+      const pdfUint8 = new Uint8Array(pdfBuffer);
+      const { text: pdfPages } = await extractText(pdfUint8);
+      const pdfText = pdfPages.join("\n").trim();
+
+      if (pdfText && pdfText.length > 50) {
+        allTextParts.push(`--- ${upload.filename} ---\n${pdfText}`);
+      } else {
+        scannedPdfs.push({
+          filename: upload.filename,
+          base64: pdfBuffer.toString("base64"),
+        });
+      }
+    }
 
     const notesText = notes
       ? `\n\nAdditional rDVM notes/comments:\n\n${notes}`
       : "";
 
-    let content: string;
+    let summaryText: string;
 
-    if (pdfText && pdfText.length > 50) {
-      // Text-based PDF — send extracted text
-      content = `Please summarize these discharge notes.${notesText}\n\n--- Discharge Notes ---\n${pdfText}`;
-    } else {
-      // Scanned PDF — send as base64 image-based content
-      const pdfBase64 = pdfBuffer.toString("base64");
+    if (scannedPdfs.length > 0 && allTextParts.length === 0) {
+      // All scanned PDFs — send as file content
+      const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = scannedPdfs.map((pdf) => ({
+        type: "file" as const,
+        file: {
+          filename: pdf.filename,
+          file_data: `data:application/pdf;base64,${pdf.base64}`,
+        },
+      }));
+      content.push({
+        type: "text",
+        text: `Please summarize these discharge notes.${notesText}`,
+      });
+
       const completion = await openai.chat.completions.create({
         model: "gpt-4o",
         max_tokens: 4096,
         messages: [
           { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: [
-              {
-                type: "file",
-                file: {
-                  filename: upload.filename,
-                  file_data: `data:application/pdf;base64,${pdfBase64}`,
-                },
-              },
-              {
-                type: "text",
-                text: `Please summarize these discharge notes.${notesText}`,
-              },
-            ],
-          },
+          { role: "user", content },
         ],
       });
+      summaryText = completion.choices[0]?.message?.content || "";
+    } else {
+      // Text-based PDFs (possibly mixed with scanned — include scanned as files too)
+      const combinedText = allTextParts.join("\n\n");
+      const textContent = `Please summarize these discharge notes.${notesText}\n\n${combinedText}`;
 
-      const summaryText = completion.choices[0]?.message?.content || "";
-      const summary = await prisma.summary.create({
-        data: { content: summaryText, uploadId: upload.id },
-      });
-      return NextResponse.json({ summary, status: "complete" });
+      if (scannedPdfs.length > 0) {
+        const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
+          { type: "text", text: textContent },
+          ...scannedPdfs.map((pdf) => ({
+            type: "file" as const,
+            file: {
+              filename: pdf.filename,
+              file_data: `data:application/pdf;base64,${pdf.base64}`,
+            },
+          })),
+        ];
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 4096,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content },
+          ],
+        });
+        summaryText = completion.choices[0]?.message?.content || "";
+      } else {
+        const completion = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 4096,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: textContent },
+          ],
+        });
+        summaryText = completion.choices[0]?.message?.content || "";
+      }
     }
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 4096,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content },
-      ],
-    });
-
-    const summaryText = completion.choices[0]?.message?.content || "";
-
+    // Link summary to the first upload
     const summary = await prisma.summary.create({
-      data: { content: summaryText, uploadId: upload.id },
+      data: { content: summaryText, uploadId: firstUpload.id },
     });
 
     return NextResponse.json({ summary, status: "complete" });

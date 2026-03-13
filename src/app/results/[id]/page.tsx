@@ -15,10 +15,16 @@ interface SummaryData {
   };
 }
 
+interface UploadFile {
+  id: string;
+  filename: string;
+}
+
 export default function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const [summary, setSummary] = useState<SummaryData | null>(null);
+  const [allUploads, setAllUploads] = useState<UploadFile[]>([]);
   const [copied, setCopied] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -31,7 +37,10 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
   useEffect(() => {
     fetch(`/api/summaries/${id}`)
       .then((r) => r.json())
-      .then((data) => setSummary(data.summary));
+      .then((data) => {
+        setSummary(data.summary);
+        setAllUploads(data.allUploads || []);
+      });
   }, [id]);
 
   async function handleCopy() {
@@ -73,15 +82,21 @@ export default function ResultsPage({ params }: { params: Promise<{ id: string }
               Summary
             </h1>
             <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {summary.upload.patient.name} —{" "}
-              <a
-                href={`/api/upload/${summary.upload.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-zinc-700 dark:hover:text-zinc-200"
-              >
-                {summary.upload.filename}
-              </a>
+              {summary.upload.patient.name}
+              {allUploads.length > 0 && " — "}
+              {allUploads.map((upload, i) => (
+                <span key={upload.id}>
+                  {i > 0 && ", "}
+                  <a
+                    href={`/api/upload/${upload.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-zinc-700 dark:hover:text-zinc-200"
+                  >
+                    {upload.filename}
+                  </a>
+                </span>
+              ))}
             </p>
           </div>
           <div className="flex gap-2">

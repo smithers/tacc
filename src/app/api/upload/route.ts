@@ -9,31 +9,34 @@ export async function POST(req: NextRequest) {
   }
 
   const formData = await req.formData();
-  const file = formData.get("file") as File | null;
+  const files = formData.getAll("files") as File[];
   const patientName = formData.get("patientName") as string | null;
 
-  if (!file || !patientName) {
-    return NextResponse.json({ error: "File and patient name are required" }, { status: 400 });
+  if (files.length === 0 || !patientName) {
+    return NextResponse.json({ error: "At least one file and patient name are required" }, { status: 400 });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-
-  // Create patient and upload in a transaction
-  const upload = await prisma.$transaction(async (tx) => {
+  const uploads = await prisma.$transaction(async (tx) => {
     const patient = await tx.patient.create({
       data: { name: patientName, species: "", breed: null, ownerName: "" },
     });
 
-    return tx.upload.create({
-      data: {
-        filename: file.name,
-        fileData: buffer,
-        mimeType: file.type || "application/pdf",
-        patientId: patient.id,
-        userId: user.id,
-      },
-    });
+    const created = [];
+    for (const file of files) {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const upload = await tx.upload.create({
+        data: {
+          filename: file.name,
+          fileData: buffer,
+          mimeType: file.type || "application/pdf",
+          patientId: patient.id,
+          userId: user.id,
+        },
+      });
+      created.push(upload);
+    }
+    return created;
   });
 
-  return NextResponse.json({ upload: { id: upload.id, filename: upload.filename } });
+  return NextResponse.json({ uploadIds: uploads.map((u) => u.id) });
 }

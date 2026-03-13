@@ -18,6 +18,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           id: true,
           filename: true,
           userId: true,
+          patientId: true,
           patient: { select: { name: true, ownerName: true } },
         },
       },
@@ -28,7 +29,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({ summary });
+  // Find all uploads for the same patient
+  const allUploads = await prisma.upload.findMany({
+    where: { patientId: summary.upload.patientId },
+    select: { id: true, filename: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return NextResponse.json({ summary, allUploads });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
